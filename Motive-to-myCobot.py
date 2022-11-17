@@ -2,20 +2,21 @@ import serial
 import math
 import numpy as np
 import threading
+import time
 from Optitrack import NatNetClient
 from pymycobot.mycobot import MyCobot
 
 ################################################################################
 # ----- Setting Parameter ----- #
-myCobotPort  = 
+myCobotPort  = 'COM8'
 
-RigidBodyID  = 9
+RigidBodyID  = 3
 RigidBodyNum = 3
 
 MovingLimit = 100   #int[mm]
 
 # ----- Optional Setting parameter ----- #
-InitCoordinatelist = [300,0,0,0,0,0] #list:[x,y,z,rx,ry,rz]
+InitCoordinatelist = [28.0,-68.5,342.2,-84.49,-13.57,-99.57] #list:[x,y,z,rx,ry,rz]
 
 baudrate = 115200    #default:115200
 speed = 100          #velocity int:0~100
@@ -94,7 +95,7 @@ class MotionCalculator:
         self.Position = np.zeros(3)
         self.Rotations = np.array([0,0,0,1])
 
-    def GetTransform(self,position,rotation)
+    def GetTransform(self,position,rotation):
         relativePos = self.GetRelativePosition(position)
         relativeRot = self.GetRelativeRotation(rotation)
 
@@ -119,7 +120,7 @@ class MotionCalculator:
 
     def GetRelativeRotation(self, rotation):
         Q_relativeRot = np.dot(self.inversedMatrix, rotation)
-        E_relativeRot = self.Euler2Quaternion(np.array(Q_relativeRot))
+        E_relativeRot = self.Quaternion2Euler(np.array(Q_relativeRot))
 
         return E_relativeRot
 
@@ -213,21 +214,33 @@ if __name__ == '__main__':
     mycobot = MyCobot(myCobotPort,baudrate)
     mycobot.send_coords(InitCoordinatelist,speed,mode)
 
+    time.sleep(3)
+
+    motionManager = MotionManager(RigidBodyNum)
+    motionCalculator = MotionCalculator(RigidBodyNum)
+
     try:
         while True:
             if isMoving:
-                position = MotionManager.LocalPosition(loopCount = LoopCount)
-                rotation = MotionManager.LocalRotation(loopCount = LoopCount)
+                position = motionManager.LocalPosition(loopCount = LoopCount)
+                rotation = motionManager.LocalRotation(loopCount = LoopCount)
 
-                mycobotPos,mycobotRot = MotionCalculator.GetTransform(MotionManager.LocalPosition(), MotionManager.LocalRotation())
+                mycobotPos,mycobotRot = MotionCalculator.GetTransform(position, rotation)
                 
                 mycobotPos = mycobotPos * 1000
 
-                mycobotTransform = [mycobotPos[2], -1 * mycobotPos[0], mycobotPos[1], mycobotRot[2], -1 * mycobotRot[0], -1 * mycobotRot[1]]
+                mycobotTransform = [mycobotPos[2] + InitCoordinatelist[0], 
+                                    mycobotPos[0] + InitCoordinatelist[1],
+                                    mycobotPos[1] + InitCoordinatelist[2], 
+                                    mycobotRot[2] + InitCoordinatelist[3], 
+                                    -1 * mycobotRot[0] + InitCoordinatelist[4], 
+                                    -1 * mycobotRot[1] + InitCoordinatelist[5]]
                 
                 diffX = mycobotTransform[0] - beforeTransform[0]
                 diffY = mycobotTransform[1] - beforeTransform[1]
                 diffZ = mycobotTransform[2] - beforeTransform[2]
+
+                beforeTransform = mycobotTransform
 
                 if abs(diffX) > MovingLimit or abs(diffY) > MovingLimit or abs(diffZ) > MovingLimit:
                     isMoving = False
@@ -236,19 +249,30 @@ if __name__ == '__main__':
                 else:
                     mycobot.send_coords(mycobotTransform,speed,mode)
 
-            else:
-                MotionCalculator.SetOriginalPosition(MotionManager.LocalPosition())
-                MotionCalculator.SetInversedMatrix(MotionManager.LocalRotation())
+                LoopCount += 1
 
-                mycobotPos,mycobotRot = MotionCalculator.GetTransform(MotionManager.LocalPosition(), MotionManager.LocalRotation())
+            else:
+                position = motionManager.LocalPosition(loopCount = LoopCount)
+                rotation = motionManager.LocalRotation(loopCount = LoopCount)
+
+                motionCalculator.SetOriginalPosition(position)
+                motionCalculator.SetInversedMatrix(rotation)
+
+                mycobotPos, mycobotRot = motionCalculator.GetTransform(position, rotation)
                 
                 mycobotPos = mycobotPos * 1000
 
-                mycobotTransform = [mycobotPos[2], -1 * mycobotPos[0], mycobotPos[1], mycobotRot[2], -1 * mycobotRot[0], -1 * mycobotRot[1]]
+                mycobotTransform = [mycobotPos[2] + InitCoordinatelist[0], 
+                                    mycobotPos[0] + InitCoordinatelist[1],
+                                    mycobotPos[1] + InitCoordinatelist[2], 
+                                    mycobotRot[2] + InitCoordinatelist[3], 
+                                    -1 * mycobotRot[0] + InitCoordinatelist[4], 
+                                    -1 * mycobotRot[1] + InitCoordinatelist[5]]
                 
                 beforeTransform  = mycobotTransform
 
                 isMoving = True
 
     except:
-        pass
+        import traceback
+        traceback.print_exc()
